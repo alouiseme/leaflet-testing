@@ -1,0 +1,169 @@
+---
+title: "Developing Metrics for Location Scheduling"
+author: "Amber Medina, FLIC Votes, Alachua County"
+output:
+  html_notebook: default
+  pdf_document: default
+---
+``` {r echo = FALSE}
+library(tidyverse)
+library(googlesheets)
+library(leaflet)
+library(sqldf)
+```
+#{.tabset}
+######Data does not reflect actual canvassing shifts. Names, collection numbers, and locations have been altered to protect privacy.
+
+##Background
+Which locations, independent of canvasser, are truly hot spots? 
+ 	
+To answer these questions, we need every bit of information about **where** canvassing takes place, **how long** we canvassed, **how many forms** were collected, if those forms were **complete** or **incomplete**, and what an **average form collection** rate might be for that location. 
+
+Starting with the location info, we need to ask Blocks for all of the **locations, addresses, and territories** and *all* shift information tied to locations. This information is not simultaneously available, but can be exported for you from your Shifts report and Locations table.
+
+##Data Dictionary
+The `locations.csv` will contain:  
+  
+``$name`` -Staging site name as submitted by QC  
+``$street_address`` - QC Staff should have entered this as ## STREET 1 but watch for incomplete street names. This will affect geocoding!  
+``$city`` -Same as above. Check spelling!  
+``$state`` - All locations will be in FLORIDA.  
+``$zipcode`` -Check that zip is 5 digits beginning with '3'  
+``$county`` -Check spelling and hyphenation for 'Miami-Dade'  
+``$latitude``  
+``$longitude``  
+  
+  
+The `shifts.csv` will contain:  
+  
+``$shift_id`` -Unique Identifier from Blocks  
+``$packet_name`` - File submitted by QC corresponding to packet  
+``$canvasser_first`` - Canvasser staged at that location  
+``$location_name`` -Name of location as submitted by QC  
+``$shift_date`` -Date of clock-in  
+``$field_start`` -Field start time  
+``$field_end`` -Field end time  
+``$forms_collected`` -Number of complete forms in packet  
+``$turf_name`` - Office name  
+
+
+##1.Tidying Up
+```{r echo = TRUE, warning = FALSE}
+library(googlesheets)
+#Import shift information
+shifts <- gs_title("Shifts_TotalForms_20180621.csv")
+
+shifts <- gs_read(shifts)
+
+#Import locations table
+locations <- gs_title("FLIC_Locations_06222018.csv")
+
+locations <- gs_read(locations)
+```
+
+```{r echo=FALSE}
+#Preview
+head(shifts)
+head(locations)
+```
+##2. Shifts
+```{r echo = TRUE}
+#Preview columns
+colnames(shifts)
+
+#Remove Columns we don't need
+shifts <- select(shifts, -shift_id, -field_start_time, -field_date, -packet_name, - shift_start, -shift_end)
+	
+#New
+head(shifts)
+```
+
+###Calculate Forms Per Hour
+$shift\;length = (start - end)\;\div\;3600s$
+```{r echo = TRUE}
+#Create a new column populated with the time difference between start and  end. The result is in seconds, so we divide by 3600 to convert to hours.    
+shifts <- shifts %>% mutate(shift_length = field_end - field_start) %>%
+	mutate(shift_length = shift_length/3600)  
+    
+#Coercing shift_length from difftime to numeric.  
+shifts$shift_length <- as.numeric(shifts$shift_length)  
+    
+#Look at shift_length! There should be no negative values! These were introduced when a QC person put in the wrong shift start or end time. We will have to take out all of these erroneous entries.
+negatives <- which(shifts$shift_length <= 0)  
+shifts <- shifts[-negatives, ]  
+    
+#Shifts now contains a column of numeric duration in hours, and we're ready to look at average form collection.  
+head(shifts$shift_length)  
+```
+
+$forms\;per\;hour= \;forms\;collected\;\div\;shift\;length$
+```{r}
+# Create a new column populated with the forms collected per hour.
+shifts <- shifts %>% mutate(formsperhour = forms_collected/shift_length)
+
+#New column containing the ratio of forms per hour
+head(shifts$formsperhour)
+
+```
+
+
+##4. Locations
+  `locations.csv` contains all of the public canvassing locations and their addresses. You can geocode this using this [tutorial](https://andrewbtran.github.io/NICAR/2017/maps/mapping-census-data.html#geolocating_addresses_in_r)
+  
+```{r echo = TRUE}
+#Taking out all of the empty columns.
+locations <-select(locations, -9, -10, -11, -12, -13, -14, -15, -16, -17, -18, -19, -20, -21, -22)
+
+head(locations)
+```
+  For tables with `latitude` and `longitude` we need to append those values to the shifts data frame matching on the location name. I don't want to mess with the `sqldf` package, so I'm going to use the handy `left_join()` in `dplyr`. 
+  
+```{sql echo = TRUE, eval = FALSE}
+--What we would have had in SQL syntax:
+SELECT * FROM shifts AS s
+JOIN locations AS l
+ON s.location_name = l.location_name
+```
+
+```{r echo = TRUE}
+#What is wonderful about R:
+FLIC_FPH <- left_join( x = shifts, y = locations, by = "location_name") 
+```
+##5.First map
+```{r eval = TRUE}
+#package
+library(leaflet)
+library(colorspace)
+
+take <- which(is.na(FLIC_FPH$latitude))
+FLIC_FPH <- FLIC_FPH[-take, ]
+
+#summary
+summary(FLIC_FPH$formsperhour)
+
+#create bins
+FLIC_FPH$fph_range <- cut(FLIC_FPH$formsperhour, 
+										 breaks = c(0.8, 1, 2, 38),
+										 right = TRUE,
+										 labels = c("Bad [0.8-1)", "Good [1-2)", "Best [2-38)"))
+
+#define colors
+pal <- colorFactor( palette = c("#A01606", "#FFC300", "#0D982F"), domain = FLIC_FPH$fph_range)
+
+
+m <- leaflet(FLIC_FPH) %>% 
+	addTiles() %>% 
+	setView(-82.36376, 29.61666, zoom = 12) %>% 
+	addCircleMarkers(
+		lat = ~latitude,
+		lng = ~longitude,
+		color = ~pal(fph_range),
+		radius = 2.5,
+		opacity = 0.75,
+		label = paste("Site:", FLIC_FPH$location_name)) %>%
+	addLegend( position = "topleft", pal = pal, values = FLIC_FPH$fph_range, title = "Form Collection Rate")
+
+m
+```
+##6. Grouped by Location
+
