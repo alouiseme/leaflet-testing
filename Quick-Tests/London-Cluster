@@ -5,7 +5,7 @@ install.packages("leaflet")
 library(leaflet)
 
 #dataframe containing locations
-locations <- read.csv("https://raw.githubusercontent.com/alouiseme/leaflet-testing/master/locations.csv")
+locations <- read.csv("https://raw.githubusercontent.com/alouiseme/leaflet-testing/Quick-Tests/locations.csv")
 
 #Inspect Head of DF
 head(locations)
