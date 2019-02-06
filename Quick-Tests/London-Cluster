@@ -1,0 +1,26 @@
+
+install.packages("leaflet")
+
+#call to library
+library(leaflet)
+
+#dataframe containing locations
+locations <- read.csv("https://raw.githubusercontent.com/alouiseme/leaflet-testing/master/locations.csv")
+
+#Inspect Head of DF
+head(locations)
+
+#map
+pal <- c("#A01606")
+
+m <- leaflet(locations) %>% 
+  addTiles()%>%
+  setView(lat = 51.515650, lng = -0.142875, zoom = 10) %>% 
+  addCircleMarkers(
+    lat = ~lat,
+    lng = ~lon,
+    radius = 2.5,
+    opacity = 0.75,
+    label = paste("Site:", locations$label))
+
+m
