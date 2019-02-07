@@ -1,0 +1,30 @@
+#load package
+library(leaflet)
+
+#create bins for range of forms per hour
+FLIC_FPH$fph_range <- cut(FLIC_FPH$formsperhour, 
+													breaks = c(0.8, 1, 2, 38),
+													right = TRUE,
+													labels = c("Bad [0.8-1)", "Good [1-2)", "Best [2-38)"))
+
+#define color pal for range
+pal <- colorFactor( palette = c("#A01606", "#FFC300", "#0D982F"), domain = FLIC_FPH$fph_range)
+
+#create map object
+m <- leaflet(FLIC_FPH) %>% 
+
+#standard provider tiles
+	addTiles() %>% 
+  
+  #control view on Gainesville area (points in MIAMI out of view)
+	setView(-82.36376, 29.61666, zoom = 12) %>% 
+
+#plot points, map colors to fph ranges
+	addCircleMarkers(
+		lat = ~latitude,
+		lng = ~longitude,
+		color = ~pal(fph_range),
+		radius = 2.5,
+		opacity = 0.75,
+		label = paste("Site:", FLIC_FPH$location_name)) %>%
+	addLegend( position = "topleft", pal = pal, values = FLIC_FPH$fph_range, title = "Form Collection Rate")
